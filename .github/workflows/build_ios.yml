@@ -25,34 +25,36 @@ jobs:
       - name: Get Flutter Dependencies
         run: flutter pub get
 
+      - name: Create iOS Project Files
+        run: flutter create . --platforms=ios
+
       - name: Generate Fresh Podfile with iOS 14.0 Target
         run: |
-          if [ ! -d "ios" ]; then
-            flutter create . --platforms=ios
-          fi
+          ruby -e '
+          podfile = <<~PODFILE
+            platform :ios, "14.0"
 
-          cat << 'EOF' > ios/Podfile
-platform :ios, '14.0'
+            use_frameworks!
+            use_modular_headers!
 
-use_frameworks!
-use_modular_headers!
+            target "Runner" do
+              use_frameworks!
+              use_modular_headers!
+              flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+            end
 
-target 'Runner' do
-  use_frameworks!
-  use_modular_headers!
+            post_install do |installer|
+              installer.pods_project.targets.each do |target|
+                flutter_additional_ios_build_settings(target)
+                target.build_configurations.each do |config|
+                  config.build_settings["IPHONEOS_DEPLOYMENT_TARGET"] = "14.0"
+                end
+              end
+            end
+          PODFILE
 
-  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-end
-
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    flutter_additional_ios_build_settings(target)
-    target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
-    end
-  end
-end
-EOF
+          File.write("ios/Podfile", podfile)
+          '
 
       - name: Install CocoaPods
         run: |

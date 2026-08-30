@@ -101,3 +101,4 @@ reporting weighted progress (50% / 15% / 25% / 10%) through
 - **Volume boost range**: the UI slider is capped at 100-300% to match the
   spec; the service itself clamps to 10-300% (`0.1x`-`3.0x`).
 # Flutter-Video-Editor
+# Flutter-Video-Editor

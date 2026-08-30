@@ -5,10 +5,6 @@ on:
 
 jobs:
   # ══════════════════════════════════════════════════════════════
-  # 🤖 Android APK Build
-  # ══════════════════════════════════════════════════════════════
-
-  # ══════════════════════════════════════════════════════════════
   # 🍎 iOS Unsigned IPA Build
   # ══════════════════════════════════════════════════════════════
   build-ios:
@@ -34,6 +30,28 @@ jobs:
           if [ ! -d "ios" ] || [ ! -f "ios/Podfile" ]; then
             flutter create . --platforms=ios
           fi
+
+      - name: Set iOS Deployment Target to 14.0 in Podfile
+        run: |
+          # Podfile-e platform line active/update kora
+          if grep -q "platform :ios" ios/Podfile; then
+            sed -i '' "s/platform :ios, .*/platform :ios, '14.0'/" ios/Podfile
+          else
+            sed -i '' "1s/^/platform :ios, '14.0'\n/" ios/Podfile
+          fi
+
+          # post_install block-e target 14.0 force kora
+          cat << 'EOF' >> ios/Podfile
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              flutter_additional_ios_build_settings(target)
+              target.build_configurations.each do |config|
+                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+              end
+            end
+          end
+          EOF
 
       - name: Install CocoaPods
         run: |
@@ -79,7 +97,7 @@ jobs:
             DEVELOPMENT_TEAM="" \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             ONLY_ACTIVE_ARCH=NO \
-            IPHONEOS_DEPLOYMENT_TARGET=13.0
+            IPHONEOS_DEPLOYMENT_TARGET=14.0
 
       - name: Verify archive created
         run: |

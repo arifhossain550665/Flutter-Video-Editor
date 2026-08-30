@@ -26,7 +26,7 @@ jobs:
         run: flutter pub get
 
       - name: Create iOS Project Files
-        run: flutter create . --platforms=ios
+        run: flutter create . --platforms=ios --project-name=flutter_video_editor
 
       - name: Generate Fresh Podfile with iOS 14.0 Target
         run: |

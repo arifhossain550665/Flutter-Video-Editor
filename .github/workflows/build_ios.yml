@@ -25,43 +25,34 @@ jobs:
       - name: Get Flutter Dependencies
         run: flutter pub get
 
-      - name: Ensure iOS platform files exist
+      - name: Generate Fresh Podfile with iOS 14.0 Target
         run: |
-          if [ ! -d "ios" ] || [ ! -f "ios/Podfile" ]; then
+          if [ ! -d "ios" ]; then
             flutter create . --platforms=ios
           fi
 
-      - name: Set iOS Deployment Target to 14.0 in Podfile
-        run: |
-          # 1. Platform version 14.0 set kora
-          if grep -q "platform :ios" ios/Podfile; then
-            sed -i '' "s/platform :ios, .*/platform :ios, '14.0'/" ios/Podfile
-          else
-            sed -i '' "1s/^/platform :ios, '14.0'\n/" ios/Podfile
-          fi
+          cat << 'EOF' > ios/Podfile
+platform :ios, '14.0'
 
-          # 2. Existing post_install block-er bhitore target version force inject kora
-          if grep -q "post_install" ios/Podfile; then
-            ruby -e '
-              file = "ios/Podfile"
-              content = File.read(file)
-              target_code = "    target.build_configurations.each do |config|\n      config.build_settings[\"IPHONEOS_DEPLOYMENT_TARGET\"] = \"14.0\"\n    end\n"
-              new_content = content.sub(/flutter_additional_ios_build_settings\(target\)/, "flutter_additional_ios_build_settings(target)\n" + target_code)
-              File.write(file, new_content)
-            '
-          else
-            cat << 'EOF' >> ios/Podfile
+use_frameworks!
+use_modular_headers!
 
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              flutter_additional_ios_build_settings(target)
-              target.build_configurations.each do |config|
-                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
-              end
-            end
-          end
-          EOF
-          fi
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+    end
+  end
+end
+EOF
 
       - name: Install CocoaPods
         run: |

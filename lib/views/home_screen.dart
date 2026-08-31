@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/editor_controller.dart';
+import 'about_screen.dart';
 import 'editor_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -10,7 +11,18 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Video Editor')),
+      appBar: AppBar(
+        title: const Text('Video Editor'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'About',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AboutScreen()),
+            ),
+          ),
+        ],
+      ),
       body: Consumer<EditorController>(
         builder: (context, controller, _) {
           return Center(

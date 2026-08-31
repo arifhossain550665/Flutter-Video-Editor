@@ -15,8 +15,8 @@ enum ExportStage {
 }
 
 /// Single source of truth for the editor screen: the list of imported
-/// clips, the chosen audio/noise/volume settings, and the state of an
-/// in-progress export.
+/// clips, the chosen background-audio/noise/volume settings, and the state
+/// of an in-progress export.
 class EditorController extends ChangeNotifier {
   final FFmpegService _ffmpegService = FFmpegService();
   final MediaService _mediaService = MediaService();
@@ -31,17 +31,19 @@ class EditorController extends ChangeNotifier {
   String? errorMessage;
   String? exportedFilePath;
 
-  /// Opens the video picker, probes each selected file's duration, and adds
-  /// it to the clip list.
+  /// Opens the video picker, probes each selected file's duration and
+  /// dimensions, and adds it to the clip list.
   Future<void> importVideos() async {
     final files = await _mediaService.pickVideoFiles();
     for (final file in files) {
-      final duration = await _mediaService.probeVideoDuration(file.path);
+      final metadata = await _mediaService.probeVideoMetadata(file.path);
       clips.add(
         VideoClip(
           id: '${DateTime.now().microsecondsSinceEpoch}_${clips.length}',
           sourcePath: file.path,
-          sourceDuration: duration,
+          sourceDuration: metadata.duration,
+          sourceWidth: metadata.width > 0 ? metadata.width : 1280,
+          sourceHeight: metadata.height > 0 ? metadata.height : 720,
         ),
       );
     }
@@ -60,10 +62,24 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateClipTrim(String id, Duration start, Duration end) {
+  /// Updates a clip's trim range and its own per-clip audio settings
+  /// (noise cancellation + volume boost applied to that clip's original
+  /// audio track, independent of the project-wide background audio track).
+  void updateClipSettings(
+    String id, {
+    required Duration start,
+    required Duration end,
+    required double volumePercent,
+    required bool noiseCancellation,
+  }) {
     final index = clips.indexWhere((c) => c.id == id);
     if (index == -1) return;
-    clips[index] = clips[index].copyWith(trimStart: start, trimEnd: end);
+    clips[index] = clips[index].copyWith(
+      trimStart: start,
+      trimEnd: end,
+      volumePercent: volumePercent,
+      noiseCancellationEnabled: noiseCancellation,
+    );
     notifyListeners();
   }
 
@@ -97,9 +113,40 @@ class EditorController extends ChangeNotifier {
         (sum, c) => sum + c.trimmedDuration.inMilliseconds / 1000.0,
       );
 
-  /// Runs the full trim -> merge -> mix audio -> save pipeline, reporting
-  /// weighted progress across every stage through [overallProgress].
-  /// Returns true on success.
+  /// Picks the shared output resolution for the whole project: the first
+  /// clip's own aspect ratio (so the export keeps the ratio the video was
+  /// shot in - portrait stays portrait, landscape stays landscape - instead
+  /// of being forced into a fixed 16:9 frame), capped to a sane maximum
+  /// dimension so encodes stay fast, with both sides forced even (required
+  /// by yuv420p/H.264).
+  ({int width, int height}) _resolveTargetResolution() {
+    const maxDimension = 1920;
+    var width = clips.first.sourceWidth;
+    var height = clips.first.sourceHeight;
+
+    if (width <= 0 || height <= 0) {
+      width = 1280;
+      height = 720;
+    }
+
+    if (width > maxDimension || height > maxDimension) {
+      if (width >= height) {
+        height = (height * maxDimension / width).round();
+        width = maxDimension;
+      } else {
+        width = (width * maxDimension / height).round();
+        height = maxDimension;
+      }
+    }
+
+    if (width % 2 != 0) width -= 1;
+    if (height % 2 != 0) height -= 1;
+    return (width: width, height: height);
+  }
+
+  /// Runs the full trim -> merge -> mix background audio -> save pipeline,
+  /// reporting weighted progress across every stage through
+  /// [overallProgress]. Returns true on success.
   Future<bool> exportVideo() async {
     if (clips.isEmpty) {
       errorMessage = 'Add at least one video clip before exporting.';
@@ -133,6 +180,8 @@ class EditorController extends ChangeNotifier {
       stage = ExportStage.trimming;
       notifyListeners();
 
+      final target = _resolveTargetResolution();
+
       final trimmedPaths = <String>[];
       for (var i = 0; i < clips.length; i++) {
         final clip = clips[i];
@@ -141,7 +190,11 @@ class EditorController extends ChangeNotifier {
           inputPath: clip.sourcePath,
           start: clip.trimStart,
           end: clip.trimEnd,
+          targetWidth: target.width,
+          targetHeight: target.height,
           outputPath: outputPath,
+          noiseCancellation: clip.noiseCancellationEnabled,
+          volumePercent: clip.volumePercent,
           onProgress: (p) {
             final clipShare = 1 / clips.length;
             final completedShare = i / clips.length;

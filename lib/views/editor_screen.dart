@@ -85,7 +85,10 @@ class EditorScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Edit Video'),
+        title: Consumer<EditorController>(
+          builder: (context, controller, _) =>
+              Text(controller.project?.name ?? 'Edit Video'),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.info_outline),
@@ -98,6 +101,9 @@ class EditorScreen extends StatelessWidget {
       ),
       body: Consumer<EditorController>(
         builder: (context, controller, _) {
+          if (!controller.hasProject) {
+            return const Center(child: Text('No project loaded.'));
+          }
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -145,8 +151,8 @@ class EditorScreen extends StatelessWidget {
               if (controller.backgroundAudioPath == null)
                 OutlinedButton.icon(
                   onPressed: () => controller.pickBackgroundAudio(),
-                  icon: const Icon(Icons.music_note_outlined),
-                  label: const Text('Add Background Audio'),
+                  icon: const Icon(Icons.folder_outlined),
+                  label: const Text('Add Background Audio (from Storage)'),
                 )
               else
                 ListTile(
@@ -182,6 +188,9 @@ class EditorScreen extends StatelessWidget {
                 onChanged: controller.backgroundAudioPath == null
                     ? null
                     : controller.setVolumePercent,
+                onChangeEnd: controller.backgroundAudioPath == null
+                    ? null
+                    : (_) => controller.persistProject(),
               ),
               const Divider(height: 32),
               Text(

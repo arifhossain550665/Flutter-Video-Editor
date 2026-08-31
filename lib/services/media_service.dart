@@ -38,10 +38,23 @@ class MediaService {
   }
 
   /// Opens the system file picker and lets the user select a single audio
-  /// file to use as background music.
+  /// file to use as background music. Uses FileType.custom with an
+  /// explicit extension list (instead of FileType.audio) so the OS opens a
+  /// plain file/storage browser - on Android, FileType.audio can route
+  /// through a "choose an audio app" chooser instead of letting the user
+  /// browse files directly, which is not what we want here.
   Future<File?> pickAudioFile() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
+      type: FileType.custom,
+      allowedExtensions: [
+        'mp3',
+        'wav',
+        'm4a',
+        'aac',
+        'ogg',
+        'flac',
+        'wma',
+      ],
       allowMultiple: false,
     );
     if (result == null || result.files.isEmpty) return null;
@@ -70,23 +83,13 @@ class MediaService {
   }
 
   /// Returns (and creates if necessary) the scratch directory used to store
-  /// intermediate files produced while editing (trimmed clips, concat
-  /// lists, merged output, thumbnails, etc).
+  /// short-lived intermediate files produced while exporting (trimmed
+  /// clips, concat lists, merged output, etc). This is separate from
+  /// project storage - project media is copied into its own permanent
+  /// folder by ProjectService and is never cleared by this method.
   Future<Directory> getWorkingDirectory() async {
     final base = await getTemporaryDirectory();
     final dir = Directory('${base.path}/video_editor_work');
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    return dir;
-  }
-
-  /// Returns (and creates if necessary) a named subdirectory inside the
-  /// working directory - used to keep one clip's filmstrip thumbnails
-  /// separate from another's.
-  Future<Directory> newTempSubdirectory(String name) async {
-    final base = await getWorkingDirectory();
-    final dir = Directory('${base.path}/$name');
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }

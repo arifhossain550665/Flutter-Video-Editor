@@ -61,6 +61,29 @@ class FFmpegService {
     return session.getMediaInformation();
   }
 
+  /// Builds the audio filter chain shared by both trimAndNormalize and
+  /// mixBackgroundAudio: an optional highpass (removes low-frequency
+  /// rumble/hum, which is most of what people perceive as "background
+  /// noise") followed by an FFT-based denoiser, then an optional volume
+  /// boost with a limiter so the boost never hard-clips. Returns an empty
+  /// list if neither noise cancellation nor a volume change is requested.
+  List<String> _audioFilters({
+    required bool noiseCancellation,
+    required double volumePercent,
+  }) {
+    final filters = <String>[];
+    if (noiseCancellation) {
+      filters.add('highpass=f=100');
+      filters.add('afftdn=nf=-30');
+    }
+    final multiplier = (volumePercent / 100.0).clamp(0.1, 3.0);
+    if (multiplier != 1.0) {
+      filters.add('volume=$multiplier');
+      filters.add('alimiter=limit=0.95');
+    }
+    return filters;
+  }
+
   /// Trims [inputPath] to the range [start, end], scales/pads it to
   /// [targetWidth]x[targetHeight] (the shared project resolution the caller
   /// decides once for the whole export - normally the first imported clip's
@@ -93,13 +116,10 @@ class FFmpegService {
 
     String audioArgs;
     if (hasAudio) {
-      final filters = <String>[];
-      if (noiseCancellation) filters.add('afftdn=nf=-25');
-      final multiplier = (volumePercent / 100.0).clamp(0.1, 3.0);
-      if (multiplier != 1.0) {
-        filters.add('volume=$multiplier');
-        filters.add('alimiter=limit=0.95');
-      }
+      final filters = _audioFilters(
+        noiseCancellation: noiseCancellation,
+        volumePercent: volumePercent,
+      );
       final audioFilterArg = filters.isEmpty ? '' : '-af "${filters.join(',')}" ';
       audioArgs = '$audioFilterArg-c:a aac -b:a 192k -ar 44100 -ac 2';
     } else {
@@ -163,12 +183,13 @@ class FFmpegService {
   }
 
   /// Mixes a background audio track into [videoPath]. When [noiseCancellation]
-  /// is true, an adaptive FFT noise-reduction filter (afftdn) is applied to
-  /// the background track first. [volumePercent] (100-300) boosts the
-  /// background track's loudness, with a limiter applied afterwards so the
-  /// boosted audio never hard-clips. If the source video already has its own
-  /// audio track, the two tracks are mixed together; otherwise the
-  /// background track becomes the video's only audio.
+  /// is true, a highpass filter plus an adaptive FFT noise-reduction filter
+  /// (afftdn) are applied to the background track first. [volumePercent]
+  /// (100-300) boosts the background track's loudness, with a limiter
+  /// applied afterwards so the boosted audio never hard-clips. If the
+  /// source video already has its own audio track, the two tracks are
+  /// mixed together; otherwise the background track becomes the video's
+  /// only audio.
   Future<void> mixBackgroundAudio({
     required String videoPath,
     required String audioPath,
@@ -179,18 +200,26 @@ class FFmpegService {
   }) async {
     final videoDuration = await getDuration(videoPath);
     final videoHasAudio = await hasAudioStream(videoPath);
-    final volumeMultiplier = (volumePercent / 100.0).clamp(0.1, 3.0);
 
-    final noiseFilter = noiseCancellation ? 'afftdn=nf=-25,' : '';
+    final filters = _audioFilters(
+      noiseCancellation: noiseCancellation,
+      volumePercent: volumePercent,
+    );
+    // amix normalizes levels itself, but we still want our own limiter as
+    // the final safety net after any boost, so always ensure one is present
+    // when a background track is involved.
+    if (!filters.contains('alimiter=limit=0.95')) {
+      filters.add('alimiter=limit=0.95');
+    }
+    final bgChain = filters.join(',');
 
     final String filterComplex;
     if (videoHasAudio) {
-      filterComplex = '[1:a]${noiseFilter}volume=$volumeMultiplier[bg];'
+      filterComplex = '[1:a]$bgChain[bg];'
           '[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2,'
           'alimiter=limit=0.95[aout]';
     } else {
-      filterComplex =
-          '[1:a]${noiseFilter}volume=$volumeMultiplier,alimiter=limit=0.95[aout]';
+      filterComplex = '[1:a]$bgChain[aout]';
     }
 
     final command = '-y -i "$videoPath" -i "$audioPath" '
@@ -209,9 +238,10 @@ class FFmpegService {
 
   /// Extracts [count] evenly spaced frame thumbnails across [totalDuration]
   /// from [inputPath] into [outputDir], scaled down to filmstrip size, for
-  /// the CapCut-style trim timeline. Returns the sorted list of thumbnail
-  /// file paths (empty list if generation fails - the UI falls back to a
-  /// plain track instead of blocking trimming on it).
+  /// the CapCut-style trim timeline (and for a single-frame project cover
+  /// thumbnail when [count] is 1). Returns the sorted list of thumbnail
+  /// file paths (empty list if generation fails - callers fall back to a
+  /// placeholder instead of blocking on it).
   Future<List<String>> generateThumbnails({
     required String inputPath,
     required Duration totalDuration,

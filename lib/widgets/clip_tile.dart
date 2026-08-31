@@ -22,14 +22,38 @@ class ClipTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasAudioTweaks =
+        clip.noiseCancellationEnabled || clip.volumePercent != 100;
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListTile(
         leading: const CircleAvatar(child: Icon(Icons.movie_outlined)),
         title: Text(clip.fileName, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          'Trim: ${_format(clip.trimStart)} - ${_format(clip.trimEnd)} '
-          '(${(clip.trimmedDuration.inMilliseconds / 1000).toStringAsFixed(1)}s)',
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Trim: ${_format(clip.trimStart)} - ${_format(clip.trimEnd)} '
+              '(${(clip.trimmedDuration.inMilliseconds / 1000).toStringAsFixed(1)}s)',
+            ),
+            if (hasAudioTweaks)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Wrap(
+                  spacing: 6,
+                  children: [
+                    if (clip.noiseCancellationEnabled)
+                      const _Badge(icon: Icons.graphic_eq, label: 'Denoised'),
+                    if (clip.volumePercent != 100)
+                      _Badge(
+                        icon: Icons.volume_up,
+                        label: '${clip.volumePercent.round()}%',
+                      ),
+                  ],
+                ),
+              ),
+          ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -46,6 +70,34 @@ class ClipTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _Badge({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.amber.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: Colors.amber.shade400),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(fontSize: 10, color: Colors.amber.shade400),
+          ),
+        ],
       ),
     );
   }

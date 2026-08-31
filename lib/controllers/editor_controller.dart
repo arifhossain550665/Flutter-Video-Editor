@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 
+import '../models/project.dart';
 import '../models/video_clip.dart';
 import '../services/ffmpeg_service.dart';
 import '../services/media_service.dart';
+import '../services/project_service.dart';
 
 enum ExportStage {
   idle,
@@ -14,51 +16,119 @@ enum ExportStage {
   error,
 }
 
-/// Single source of truth for the editor screen: the list of imported
-/// clips, the chosen background-audio/noise/volume settings, and the state
-/// of an in-progress export.
+/// Single source of truth for the editor screen. Wraps one loaded [Project]
+/// at a time: its clips, its background-audio/noise/volume settings, and
+/// the state of an in-progress export. Every meaningful edit is persisted
+/// to disk through ProjectService immediately, so a project always reopens
+/// exactly where the user left it - CapCut-style.
 class EditorController extends ChangeNotifier {
   final FFmpegService _ffmpegService = FFmpegService();
   final MediaService _mediaService = MediaService();
+  final ProjectService _projectService = ProjectService();
 
-  final List<VideoClip> clips = [];
-  String? backgroundAudioPath;
-  bool noiseCancellationEnabled = false;
-  double volumePercent = 100;
+  Project? _project;
+  Project? get project => _project;
+  bool get hasProject => _project != null;
+
+  List<VideoClip> get clips => _project?.clips ?? const [];
+  String? get backgroundAudioPath => _project?.backgroundAudioPath;
+  bool get noiseCancellationEnabled =>
+      _project?.noiseCancellationEnabled ?? false;
+  double get volumePercent => _project?.volumePercent ?? 100;
 
   ExportStage stage = ExportStage.idle;
   double overallProgress = 0.0;
   String? errorMessage;
   String? exportedFilePath;
 
+  /// Loads a project (freshly created or opened from the projects grid)
+  /// as the one currently being edited, resetting any leftover export
+  /// state from a previous project.
+  Future<void> loadProject(Project project) async {
+    _project = project;
+    stage = ExportStage.idle;
+    overallProgress = 0.0;
+    errorMessage = null;
+    exportedFilePath = null;
+    notifyListeners();
+  }
+
+  /// Unloads the current project without touching its saved file - used
+  /// when a just-created draft is abandoned (e.g. the user cancels the
+  /// video picker) before anything worth keeping was added.
+  void clearProject() {
+    _project = null;
+    notifyListeners();
+  }
+
+  /// Writes the current project's state to disk right now. Editor screen
+  /// widgets call this directly for interactions that shouldn't save on
+  /// every intermediate tick (e.g. a slider's onChangeEnd).
+  Future<void> persistProject() async {
+    if (_project == null) return;
+    await _projectService.saveProject(_project!);
+  }
+
   /// Opens the video picker, probes each selected file's duration and
-  /// dimensions, and adds it to the clip list.
+  /// dimensions, copies it into the project's own permanent media folder,
+  /// and adds it to the clip list. Generates the project's cover thumbnail
+  /// from the first clip the first time this is called.
   Future<void> importVideos() async {
+    if (_project == null) return;
     final files = await _mediaService.pickVideoFiles();
+    if (files.isEmpty) return;
+
     for (final file in files) {
       final metadata = await _mediaService.probeVideoMetadata(file.path);
-      clips.add(
+      final persistedPath =
+          await _projectService.importMedia(_project!.id, file);
+      _project!.clips.add(
         VideoClip(
-          id: '${DateTime.now().microsecondsSinceEpoch}_${clips.length}',
-          sourcePath: file.path,
+          id: '${DateTime.now().microsecondsSinceEpoch}_${_project!.clips.length}',
+          sourcePath: persistedPath,
           sourceDuration: metadata.duration,
           sourceWidth: metadata.width > 0 ? metadata.width : 1280,
           sourceHeight: metadata.height > 0 ? metadata.height : 720,
         ),
       );
     }
+
+    if (_project!.thumbnailPath == null && _project!.clips.isNotEmpty) {
+      try {
+        final dir = await _projectService.projectDir(_project!.id);
+        final firstClip = _project!.clips.first;
+        final thumbs = await _ffmpegService.generateThumbnails(
+          inputPath: firstClip.sourcePath,
+          totalDuration: firstClip.sourceDuration,
+          outputDir: dir.path,
+          count: 1,
+        );
+        if (thumbs.isNotEmpty) {
+          _project!.thumbnailPath = thumbs.first;
+        }
+      } catch (_) {
+        // Best effort - a project without a thumbnail just shows a
+        // placeholder icon in the projects grid.
+      }
+    }
+
+    await persistProject();
     notifyListeners();
   }
 
   void removeClip(String id) {
-    clips.removeWhere((c) => c.id == id);
+    if (_project == null) return;
+    _project!.clips.removeWhere((c) => c.id == id);
+    persistProject();
     notifyListeners();
   }
 
   void reorderClip(int oldIndex, int newIndex) {
+    if (_project == null) return;
     if (newIndex > oldIndex) newIndex -= 1;
-    final clip = clips.removeAt(oldIndex);
-    clips.insert(newIndex, clip);
+    final clip = _project!.clips.removeAt(oldIndex);
+    _project!.clips.insert(newIndex, clip);
+    persistProject();
     notifyListeners();
   }
 
@@ -72,39 +142,54 @@ class EditorController extends ChangeNotifier {
     required double volumePercent,
     required bool noiseCancellation,
   }) {
-    final index = clips.indexWhere((c) => c.id == id);
+    if (_project == null) return;
+    final index = _project!.clips.indexWhere((c) => c.id == id);
     if (index == -1) return;
-    clips[index] = clips[index].copyWith(
+    _project!.clips[index] = _project!.clips[index].copyWith(
       trimStart: start,
       trimEnd: end,
       volumePercent: volumePercent,
       noiseCancellationEnabled: noiseCancellation,
     );
+    persistProject();
     notifyListeners();
   }
 
+  /// Opens the file picker (storage, not a music-app chooser) and copies
+  /// the chosen audio file into the project's own media folder.
   Future<void> pickBackgroundAudio() async {
+    if (_project == null) return;
     final file = await _mediaService.pickAudioFile();
-    if (file != null) {
-      backgroundAudioPath = file.path;
-      notifyListeners();
-    }
+    if (file == null) return;
+    final persistedPath =
+        await _projectService.importMedia(_project!.id, file);
+    _project!.backgroundAudioPath = persistedPath;
+    await persistProject();
+    notifyListeners();
   }
 
   void removeBackgroundAudio() {
-    backgroundAudioPath = null;
-    noiseCancellationEnabled = false;
-    volumePercent = 100;
+    if (_project == null) return;
+    _project!.backgroundAudioPath = null;
+    _project!.noiseCancellationEnabled = false;
+    _project!.volumePercent = 100;
+    persistProject();
     notifyListeners();
   }
 
   void setNoiseCancellation(bool value) {
-    noiseCancellationEnabled = value;
+    if (_project == null) return;
+    _project!.noiseCancellationEnabled = value;
+    persistProject();
     notifyListeners();
   }
 
+  /// Updates the live slider value without writing to disk on every tick.
+  /// Call [persistProject] (e.g. from the slider's onChangeEnd) once the
+  /// user finishes dragging.
   void setVolumePercent(double value) {
-    volumePercent = value;
+    if (_project == null) return;
+    _project!.volumePercent = value;
     notifyListeners();
   }
 
@@ -148,7 +233,7 @@ class EditorController extends ChangeNotifier {
   /// reporting weighted progress across every stage through
   /// [overallProgress]. Returns true on success.
   Future<bool> exportVideo() async {
-    if (clips.isEmpty) {
+    if (_project == null || clips.isEmpty) {
       errorMessage = 'Add at least one video clip before exporting.';
       stage = ExportStage.error;
       notifyListeners();

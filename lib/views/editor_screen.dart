@@ -5,6 +5,7 @@ import '../controllers/editor_controller.dart';
 import '../models/video_clip.dart';
 import '../widgets/clip_tile.dart';
 import '../widgets/progress_dialog.dart';
+import 'about_screen.dart';
 import 'trim_screen.dart';
 
 class EditorScreen extends StatelessWidget {
@@ -15,11 +16,17 @@ class EditorScreen extends StatelessWidget {
     EditorController controller,
     VideoClip clip,
   ) async {
-    final result = await Navigator.of(context).push<Map<String, Duration>>(
+    final result = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(builder: (_) => TrimScreen(clip: clip)),
     );
     if (result != null) {
-      controller.updateClipTrim(clip.id, result['start']!, result['end']!);
+      controller.updateClipSettings(
+        clip.id,
+        start: result['start'] as Duration,
+        end: result['end'] as Duration,
+        volumePercent: result['volumePercent'] as double,
+        noiseCancellation: result['noiseCancellation'] as bool,
+      );
     }
   }
 
@@ -77,7 +84,18 @@ class EditorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Edit Video')),
+      appBar: AppBar(
+        title: const Text('Edit Video'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'About',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AboutScreen()),
+            ),
+          ),
+        ],
+      ),
       body: Consumer<EditorController>(
         builder: (context, controller, _) {
           return ListView(
@@ -110,6 +128,15 @@ class EditorScreen extends StatelessWidget {
                 onPressed: () => controller.importVideos(),
                 icon: const Icon(Icons.add),
                 label: const Text('Add More Clips'),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Tip: tap the scissors on a clip to trim it and adjust that '
+                "clip's own noise cancellation and volume.",
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.white54),
               ),
               const Divider(height: 32),
               Text('Background Audio',

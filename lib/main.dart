@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'controllers/editor_controller.dart';
-import 'views/home_screen.dart';
+import 'views/projects_screen.dart';
 
 void main() {
   runApp(const VideoEditorApp());
@@ -16,14 +16,14 @@ class VideoEditorApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => EditorController(),
       child: MaterialApp(
-        title: 'Video Editor',
+        title: 'INC Gang',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
           colorSchemeSeed: const Color(0xFF6750A4),
           brightness: Brightness.dark,
         ),
-        home: const HomeScreen(),
+        home: const ProjectsScreen(),
       ),
     );
   }

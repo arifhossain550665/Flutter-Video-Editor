@@ -26,13 +26,9 @@ class FFmpegProcessingException implements Exception {
 }
 
 /// Wraps every FFmpeg / FFprobe operation the editor needs: trimming,
-/// normalizing, concatenating, and mixing/boosting/denoising audio.
+/// normalizing, thumbnail extraction, concatenating, and mixing/boosting/
+/// denoising audio.
 class FFmpegService {
-  // All trimmed clips are normalized to this resolution/frame rate before
-  // concatenation so the concat demuxer can safely stream-copy them together
-  // even if the source clips came from different cameras/apps.
-  static const int _targetWidth = 1280;
-  static const int _targetHeight = 720;
   static const int _targetFps = 30;
 
   /// Reads the duration of the media file at [path].
@@ -65,15 +61,22 @@ class FFmpegService {
     return session.getMediaInformation();
   }
 
-  /// Trims [inputPath] to the range [start, end], scales/pads it to a
-  /// standard resolution and frame rate, and writes the result to
-  /// [outputPath]. Normalizing here is what allows [concatClips] to safely
-  /// stream-copy every clip together afterwards.
+  /// Trims [inputPath] to the range [start, end], scales/pads it to
+  /// [targetWidth]x[targetHeight] (the shared project resolution the caller
+  /// decides once for the whole export - normally the first imported clip's
+  /// own aspect ratio, so the exported video keeps that ratio instead of
+  /// being forced into a fixed 16:9 frame), optionally denoises and/or
+  /// boosts that clip's own audio track, and writes the result to
+  /// [outputPath].
   Future<void> trimAndNormalize({
     required String inputPath,
     required Duration start,
     required Duration end,
+    required int targetWidth,
+    required int targetHeight,
     required String outputPath,
+    bool noiseCancellation = false,
+    double volumePercent = 100,
     StageProgressCallback? onProgress,
   }) async {
     final duration = end - start;
@@ -84,11 +87,24 @@ class FFmpegService {
     final hasAudio = await hasAudioStream(inputPath);
 
     final videoFilter =
-        'scale=$_targetWidth:$_targetHeight:force_original_aspect_ratio=decrease,'
-        'pad=$_targetWidth:$_targetHeight:(ow-iw)/2:(oh-ih)/2,setsar=1,'
+        'scale=$targetWidth:$targetHeight:force_original_aspect_ratio=decrease,'
+        'pad=$targetWidth:$targetHeight:(ow-iw)/2:(oh-ih)/2,setsar=1,'
         'fps=$_targetFps';
 
-    final audioArgs = hasAudio ? '-c:a aac -b:a 192k -ar 44100 -ac 2' : '-an';
+    String audioArgs;
+    if (hasAudio) {
+      final filters = <String>[];
+      if (noiseCancellation) filters.add('afftdn=nf=-25');
+      final multiplier = (volumePercent / 100.0).clamp(0.1, 3.0);
+      if (multiplier != 1.0) {
+        filters.add('volume=$multiplier');
+        filters.add('alimiter=limit=0.95');
+      }
+      final audioFilterArg = filters.isEmpty ? '' : '-af "${filters.join(',')}" ';
+      audioArgs = '$audioFilterArg-c:a aac -b:a 192k -ar 44100 -ac 2';
+    } else {
+      audioArgs = '-an';
+    }
 
     final command = '-y '
         '-ss ${_formatTimestamp(start)} '
@@ -189,6 +205,63 @@ class FFmpegService {
       onProgress: onProgress,
       failureMessage: 'Failed to mix background audio.',
     );
+  }
+
+  /// Extracts [count] evenly spaced frame thumbnails across [totalDuration]
+  /// from [inputPath] into [outputDir], scaled down to filmstrip size, for
+  /// the CapCut-style trim timeline. Returns the sorted list of thumbnail
+  /// file paths (empty list if generation fails - the UI falls back to a
+  /// plain track instead of blocking trimming on it).
+  Future<List<String>> generateThumbnails({
+    required String inputPath,
+    required Duration totalDuration,
+    required String outputDir,
+    int count = 12,
+  }) async {
+    final totalSeconds = totalDuration.inMilliseconds / 1000.0;
+    if (totalSeconds <= 0) return [];
+
+    final interval = (totalSeconds / count).clamp(0.1, double.infinity);
+    final pattern = '$outputDir/thumb_%03d.jpg';
+
+    final command = '-y -i "$inputPath" '
+        '-vf "fps=1/$interval,scale=180:-2" '
+        '-vsync vfr -qscale:v 4 '
+        '"$pattern"';
+
+    final completer = Completer<void>();
+    await FFmpegKit.executeAsync(
+      command,
+      (session) async {
+        if (completer.isCompleted) return;
+        final returnCode = await session.getReturnCode();
+        if (ReturnCode.isSuccess(returnCode)) {
+          completer.complete();
+        } else {
+          completer.completeError(
+            FFmpegProcessingException('Failed to generate thumbnails for $inputPath'),
+          );
+        }
+      },
+      (Log log) {},
+      (Statistics statistics) {},
+    );
+
+    try {
+      await completer.future;
+    } catch (_) {
+      return [];
+    }
+
+    final dir = Directory(outputDir);
+    if (!await dir.exists()) return [];
+    final files = dir
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.path.contains('thumb_'))
+        .toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    return files.map((f) => f.path).toList();
   }
 
   Future<void> _runCommand(

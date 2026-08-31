@@ -96,6 +96,18 @@ class MediaService {
     return dir;
   }
 
+  /// Returns (and creates if necessary) a named subdirectory inside the
+  /// working directory - used to keep one clip's filmstrip thumbnails
+  /// separate from another's.
+  Future<Directory> newTempSubdirectory(String name) async {
+    final base = await getWorkingDirectory();
+    final dir = Directory('${base.path}/$name');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
   /// Generates a unique path inside the working directory for a new
   /// intermediate file with the given [extension] (no leading dot).
   Future<String> newTempFilePath(String extension) async {

@@ -48,4 +48,31 @@ class VideoClip {
           noiseCancellationEnabled ?? this.noiseCancellationEnabled,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'sourcePath': sourcePath,
+        'sourceDurationMs': sourceDuration.inMilliseconds,
+        'sourceWidth': sourceWidth,
+        'sourceHeight': sourceHeight,
+        'trimStartMs': trimStart.inMilliseconds,
+        'trimEndMs': trimEnd.inMilliseconds,
+        'volumePercent': volumePercent,
+        'noiseCancellationEnabled': noiseCancellationEnabled,
+      };
+
+  factory VideoClip.fromJson(Map<String, dynamic> json) {
+    return VideoClip(
+      id: json['id'] as String,
+      sourcePath: json['sourcePath'] as String,
+      sourceDuration: Duration(milliseconds: json['sourceDurationMs'] as int),
+      sourceWidth: json['sourceWidth'] as int,
+      sourceHeight: json['sourceHeight'] as int,
+      trimStart: Duration(milliseconds: json['trimStartMs'] as int),
+      trimEnd: Duration(milliseconds: json['trimEndMs'] as int),
+      volumePercent: (json['volumePercent'] as num?)?.toDouble() ?? 100,
+      noiseCancellationEnabled:
+          json['noiseCancellationEnabled'] as bool? ?? false,
+    );
+  }
 }

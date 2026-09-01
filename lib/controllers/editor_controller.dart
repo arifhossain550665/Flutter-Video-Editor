@@ -49,6 +49,26 @@ class EditorController extends ChangeNotifier {
   String? errorMessage;
   String? exportedFilePath;
 
+  /// True while any non-export background operation is running (importing
+  /// videos, copying background audio, generating a thumbnail, etc). Screens
+  /// show a LoadingOverlay while this is true. Export has its own dedicated
+  /// [stage]/[overallProgress] tracking and its own dialog instead.
+  bool isBusy = false;
+  String busyMessage = '';
+
+  Future<T> _withBusy<T>(String message, Future<T> Function() action) async {
+    isBusy = true;
+    busyMessage = message;
+    notifyListeners();
+    try {
+      return await action();
+    } finally {
+      isBusy = false;
+      busyMessage = '';
+      notifyListeners();
+    }
+  }
+
   /// Loads a project (freshly created or opened from the projects grid)
   /// as the one currently being edited, resetting any leftover export
   /// state from a previous project.
@@ -86,42 +106,47 @@ class EditorController extends ChangeNotifier {
     final files = await _mediaService.pickVideoFiles();
     if (files.isEmpty) return;
 
-    for (final file in files) {
-      final metadata = await _mediaService.probeVideoMetadata(file.path);
-      final persistedPath =
-          await _projectService.importMedia(_project!.id, file);
-      _project!.clips.add(
-        VideoClip(
-          id: '${DateTime.now().microsecondsSinceEpoch}_${_project!.clips.length}',
-          sourcePath: persistedPath,
-          sourceDuration: metadata.duration,
-          sourceWidth: metadata.width > 0 ? metadata.width : 1280,
-          sourceHeight: metadata.height > 0 ? metadata.height : 720,
-        ),
-      );
-    }
+    final label = files.length > 1
+        ? 'Importing ${files.length} videos...'
+        : 'Importing video...';
 
-    if (_project!.thumbnailPath == null && _project!.clips.isNotEmpty) {
-      try {
-        final dir = await _projectService.projectDir(_project!.id);
-        final firstClip = _project!.clips.first;
-        final thumbs = await _ffmpegService.generateThumbnails(
-          inputPath: firstClip.sourcePath,
-          totalDuration: firstClip.sourceDuration,
-          outputDir: dir.path,
-          count: 1,
+    await _withBusy(label, () async {
+      for (final file in files) {
+        final metadata = await _mediaService.probeVideoMetadata(file.path);
+        final persistedPath =
+            await _projectService.importMedia(_project!.id, file);
+        _project!.clips.add(
+          VideoClip(
+            id: '${DateTime.now().microsecondsSinceEpoch}_${_project!.clips.length}',
+            sourcePath: persistedPath,
+            sourceDuration: metadata.duration,
+            sourceWidth: metadata.width > 0 ? metadata.width : 1280,
+            sourceHeight: metadata.height > 0 ? metadata.height : 720,
+          ),
         );
-        if (thumbs.isNotEmpty) {
-          _project!.thumbnailPath = thumbs.first;
-        }
-      } catch (_) {
-        // Best effort - a project without a thumbnail just shows a
-        // placeholder icon in the projects grid.
       }
-    }
 
-    await persistProject();
-    notifyListeners();
+      if (_project!.thumbnailPath == null && _project!.clips.isNotEmpty) {
+        try {
+          final dir = await _projectService.projectDir(_project!.id);
+          final firstClip = _project!.clips.first;
+          final thumbs = await _ffmpegService.generateThumbnails(
+            inputPath: firstClip.sourcePath,
+            totalDuration: firstClip.sourceDuration,
+            outputDir: dir.path,
+            count: 1,
+          );
+          if (thumbs.isNotEmpty) {
+            _project!.thumbnailPath = thumbs.first;
+          }
+        } catch (_) {
+          // Best effort - a project without a thumbnail just shows a
+          // placeholder icon in the projects grid.
+        }
+      }
+
+      await persistProject();
+    });
   }
 
   void removeClip(String id) {
@@ -171,22 +196,24 @@ class EditorController extends ChangeNotifier {
     if (_project == null) return;
     final file = await _mediaService.pickAudioFile();
     if (file == null) return;
-    final persistedPath =
-        await _projectService.importMedia(_project!.id, file);
-    final duration = await _ffmpegService.getDuration(persistedPath);
-    final projectDuration = _project!.totalDuration;
 
-    _project!.backgroundAudioPath = persistedPath;
-    _project!.backgroundAudioDuration = duration;
-    _project!.backgroundAudioTrimStart = Duration.zero;
-    _project!.backgroundAudioTrimEnd =
-        (projectDuration == Duration.zero || duration <= projectDuration)
-            ? duration
-            : projectDuration;
-    _project!.backgroundAudioOffset = Duration.zero;
+    await _withBusy('Adding background audio...', () async {
+      final persistedPath =
+          await _projectService.importMedia(_project!.id, file);
+      final duration = await _ffmpegService.getDuration(persistedPath);
+      final projectDuration = _project!.totalDuration;
 
-    await persistProject();
-    notifyListeners();
+      _project!.backgroundAudioPath = persistedPath;
+      _project!.backgroundAudioDuration = duration;
+      _project!.backgroundAudioTrimStart = Duration.zero;
+      _project!.backgroundAudioTrimEnd =
+          (projectDuration == Duration.zero || duration <= projectDuration)
+              ? duration
+              : projectDuration;
+      _project!.backgroundAudioOffset = Duration.zero;
+
+      await persistProject();
+    });
   }
 
   void removeBackgroundAudio() {

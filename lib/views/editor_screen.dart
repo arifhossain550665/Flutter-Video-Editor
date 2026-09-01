@@ -3,10 +3,14 @@ import 'package:provider/provider.dart';
 
 import '../controllers/editor_controller.dart';
 import '../models/video_clip.dart';
+import '../widgets/audio_track_bar.dart';
+import '../widgets/clip_timeline.dart';
 import '../widgets/clip_tile.dart';
 import '../widgets/progress_dialog.dart';
 import 'about_screen.dart';
 import 'trim_screen.dart';
+
+const _bgColor = Color(0xFF121214);
 
 class EditorScreen extends StatelessWidget {
   const EditorScreen({super.key});
@@ -81,10 +85,18 @@ class EditorScreen extends StatelessWidget {
     controller.resetExportState();
   }
 
+  String _formatShort(Duration d) {
+    final minutes = d.inMinutes.toString().padLeft(2, '0');
+    final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _bgColor,
       appBar: AppBar(
+        backgroundColor: _bgColor,
         title: Consumer<EditorController>(
           builder: (context, controller, _) =>
               Text(controller.project?.name ?? 'Edit Video'),
@@ -104,9 +116,46 @@ class EditorScreen extends StatelessWidget {
           if (!controller.hasProject) {
             return const Center(child: Text('No project loaded.'));
           }
+          final projectDuration = controller.clips.fold<Duration>(
+            Duration.zero,
+            (sum, c) => sum + c.trimmedDuration,
+          );
+
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              Text('Timeline', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              ClipTimeline(
+                clips: controller.clips,
+                onTapClip: (clip) => _openTrimScreen(context, controller, clip),
+              ),
+              if (controller.backgroundAudioPath != null) ...[
+                const SizedBox(height: 6),
+                AudioTrackBar(
+                  label: controller.backgroundAudioPath!.split('/').last,
+                  totalProjectDuration: projectDuration,
+                  audioDuration: controller.backgroundAudioDuration,
+                  trimStart: controller.backgroundAudioTrimStart,
+                  trimEnd: controller.backgroundAudioTrimEnd,
+                  offset: controller.backgroundAudioOffset,
+                  onOffsetChanged: controller.setBackgroundAudioOffset,
+                  onTrimStartChanged: controller.setBackgroundAudioTrimStart,
+                  onTrimEndChanged: controller.setBackgroundAudioTrimEnd,
+                  onDragEnd: () => controller.persistProject(),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Song starts at ${_formatShort(controller.backgroundAudioOffset)} '
+                  'and plays for ${_formatShort(controller.backgroundAudioTrimEnd - controller.backgroundAudioTrimStart)}. '
+                  'Drag the middle to move it, drag the edges to trim it.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.white54),
+                ),
+              ],
+              const SizedBox(height: 16),
               Text('Clips', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               if (controller.clips.isEmpty)
@@ -137,8 +186,8 @@ class EditorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Tip: tap the scissors on a clip to trim it and adjust that '
-                "clip's own noise cancellation and volume.",
+                'Tip: tap a clip on the timeline (or its scissors icon below) '
+                "to trim it and adjust that clip's own noise cancellation and volume.",
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
@@ -155,20 +204,17 @@ class EditorScreen extends StatelessWidget {
                   label: const Text('Add Background Audio (from Storage)'),
                 )
               else
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.audiotrack),
-                  title: Text(
-                    controller.backgroundAudioPath!.split('/').last,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.close),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
                     onPressed: () => controller.removeBackgroundAudio(),
+                    icon: const Icon(Icons.close, size: 18),
+                    label: const Text('Remove Background Audio'),
                   ),
                 ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
+                activeColor: Colors.amber.shade400,
                 title: const Text('Noise cancellation'),
                 subtitle:
                     const Text('Reduce background hiss on the audio track'),
@@ -180,6 +226,7 @@ class EditorScreen extends StatelessWidget {
               const SizedBox(height: 8),
               Text('Volume boost: ${controller.volumePercent.round()}%'),
               Slider(
+                activeColor: Colors.amber.shade400,
                 value: controller.volumePercent,
                 min: 100,
                 max: 300,

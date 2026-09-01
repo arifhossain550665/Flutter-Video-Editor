@@ -6,33 +6,50 @@ import '../models/video_clip.dart';
 import '../widgets/audio_track_bar.dart';
 import '../widgets/clip_timeline.dart';
 import '../widgets/clip_tile.dart';
+import '../widgets/inline_clip_editor.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/progress_dialog.dart';
 import 'about_screen.dart';
-import 'trim_screen.dart';
 
 const _bgColor = Color(0xFF121214);
 
-class EditorScreen extends StatelessWidget {
+/// The main editing screen: a single continuous surface where the whole
+/// project timeline, the currently-selected clip's editor, background
+/// audio placement, and export controls all live together - CapCut-style,
+/// instead of trimming a clip on a separate page.
+class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
 
-  Future<void> _openTrimScreen(
-    BuildContext context,
+  @override
+  State<EditorScreen> createState() => _EditorScreenState();
+}
+
+class _EditorScreenState extends State<EditorScreen> {
+  String? _selectedClipId;
+
+  void _selectClip(VideoClip clip) {
+    setState(() {
+      _selectedClipId = _selectedClipId == clip.id ? null : clip.id;
+    });
+  }
+
+  void _closeInlineEditor() {
+    setState(() => _selectedClipId = null);
+  }
+
+  void _applyInlineEdit(
     EditorController controller,
     VideoClip clip,
-  ) async {
-    final result = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(builder: (_) => TrimScreen(clip: clip)),
+    Map<String, dynamic> result,
+  ) {
+    controller.updateClipSettings(
+      clip.id,
+      start: result['start'] as Duration,
+      end: result['end'] as Duration,
+      volumePercent: result['volumePercent'] as double,
+      noiseCancellation: result['noiseCancellation'] as bool,
     );
-    if (result != null) {
-      controller.updateClipSettings(
-        clip.id,
-        start: result['start'] as Duration,
-        end: result['end'] as Duration,
-        volumePercent: result['volumePercent'] as double,
-        noiseCancellation: result['noiseCancellation'] as bool,
-      );
-    }
+    setState(() => _selectedClipId = null);
   }
 
   Future<void> _startExport(
@@ -117,6 +134,24 @@ class EditorScreen extends StatelessWidget {
           if (!controller.hasProject) {
             return const Center(child: Text('No project loaded.'));
           }
+
+          // If the selected clip was removed elsewhere, drop the stale
+          // selection instead of pointing the inline editor at nothing.
+          VideoClip? selectedClip;
+          if (_selectedClipId != null) {
+            for (final c in controller.clips) {
+              if (c.id == _selectedClipId) {
+                selectedClip = c;
+                break;
+              }
+            }
+            if (selectedClip == null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _selectedClipId = null);
+              });
+            }
+          }
+
           final projectDuration = controller.clips.fold<Duration>(
             Duration.zero,
             (sum, c) => sum + c.trimmedDuration,
@@ -124,7 +159,12 @@ class EditorScreen extends StatelessWidget {
 
           return Stack(
             children: [
-              _buildBody(context, controller, projectDuration),
+              _buildBody(
+                context,
+                controller,
+                projectDuration,
+                selectedClip,
+              ),
               LoadingOverlay(
                 visible: controller.isBusy,
                 message: controller.busyMessage,
@@ -140,6 +180,7 @@ class EditorScreen extends StatelessWidget {
     BuildContext context,
     EditorController controller,
     Duration projectDuration,
+    VideoClip? selectedClip,
   ) {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -148,7 +189,8 @@ class EditorScreen extends StatelessWidget {
         const SizedBox(height: 8),
         ClipTimeline(
           clips: controller.clips,
-          onTapClip: (clip) => _openTrimScreen(context, controller, clip),
+          selectedClipId: _selectedClipId,
+          onTapClip: _selectClip,
         ),
         if (controller.backgroundAudioPath != null) ...[
           const SizedBox(height: 6),
@@ -175,6 +217,14 @@ class EditorScreen extends StatelessWidget {
                 ?.copyWith(color: Colors.white54),
           ),
         ],
+        if (selectedClip != null)
+          InlineClipEditor(
+            key: ValueKey(selectedClip.id),
+            clip: selectedClip,
+            onDone: (result) =>
+                _applyInlineEdit(controller, selectedClip!, result),
+            onClose: _closeInlineEditor,
+          ),
         const SizedBox(height: 16),
         Text('Clips', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
@@ -193,8 +243,13 @@ class EditorScreen extends StatelessWidget {
             return ClipTile(
               key: ValueKey(clip.id),
               clip: clip,
-              onTrim: () => _openTrimScreen(context, controller, clip),
-              onRemove: () => controller.removeClip(clip.id),
+              onTrim: () => _selectClip(clip),
+              onRemove: () {
+                if (_selectedClipId == clip.id) {
+                  setState(() => _selectedClipId = null);
+                }
+                controller.removeClip(clip.id);
+              },
             );
           },
         ),
@@ -206,8 +261,9 @@ class EditorScreen extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Tip: tap a clip on the timeline (or its scissors icon below) '
-          "to trim it and adjust that clip's own noise cancellation and volume.",
+          'Tip: tap a clip on the timeline (or its scissors icon below) to '
+          "edit it right here - trim, noise cancellation and volume, all "
+          "on this screen.",
           style: Theme.of(context)
               .textTheme
               .bodySmall
@@ -236,8 +292,7 @@ class EditorScreen extends StatelessWidget {
           contentPadding: EdgeInsets.zero,
           activeColor: Colors.amber.shade400,
           title: const Text('Noise cancellation'),
-          subtitle:
-              const Text('Reduce background hiss on the audio track'),
+          subtitle: const Text('Reduce background hiss on the audio track'),
           value: controller.noiseCancellationEnabled,
           onChanged: controller.backgroundAudioPath == null
               ? null

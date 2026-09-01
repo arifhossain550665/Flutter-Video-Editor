@@ -6,8 +6,12 @@ class AboutScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('About')),
+        return Scaffold(
+      backgroundColor: const Color(0xFF121214),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF121214),
+        title: const Text('About'),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [

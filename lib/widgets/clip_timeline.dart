@@ -13,12 +13,14 @@ import '../services/media_service.dart';
 /// trimming.
 class ClipTimeline extends StatefulWidget {
   final List<VideoClip> clips;
+  final String? selectedClipId;
   final ValueChanged<VideoClip> onTapClip;
 
   const ClipTimeline({
     super.key,
     required this.clips,
     required this.onTapClip,
+    this.selectedClipId,
   });
 
   @override
@@ -105,15 +107,18 @@ class _ClipTimelineState extends State<ClipTimeline> {
                 .round()
                 .clamp(1, 100000);
             final thumb = _thumbnailCache[clip.id];
+            final isSelected = clip.id == widget.selectedClipId;
             return Expanded(
               flex: flex,
               child: GestureDetector(
                 onTap: () => widget.onTapClip(clip),
                 child: Container(
                   decoration: BoxDecoration(
-                    border: const Border(
-                      right: BorderSide(color: Colors.black, width: 1),
-                    ),
+                    border: isSelected
+                        ? Border.all(color: Colors.amber.shade400, width: 3)
+                        : const Border(
+                            right: BorderSide(color: Colors.black, width: 1),
+                          ),
                     image: thumb != null
                         ? DecorationImage(
                             image: FileImage(File(thumb)),

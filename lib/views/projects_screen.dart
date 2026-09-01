@@ -110,9 +110,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+        return Scaffold(
+      backgroundColor: const Color(0xFF121214),
       appBar: AppBar(
-        title: const Text('My Projects'),
+        backgroundColor: const Color(0xFF121214),
+        title: const Text('INC Projects'),
         actions: [
           IconButton(
             icon: const Icon(Icons.info_outline),

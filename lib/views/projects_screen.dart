@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../controllers/editor_controller.dart';
 import '../models/project.dart';
 import '../services/project_service.dart';
+import '../widgets/loading_overlay.dart';
 import 'about_screen.dart';
 import 'editor_screen.dart';
 
@@ -110,11 +111,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   @override
   Widget build(BuildContext context) {
-        return Scaffold(
+    return Scaffold(
       backgroundColor: const Color(0xFF121214),
       appBar: AppBar(
         backgroundColor: const Color(0xFF121214),
-        title: const Text('INC Projects'),
+        title: const Text('My Projects'),
         actions: [
           IconButton(
             icon: const Icon(Icons.info_outline),
@@ -130,50 +131,60 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         icon: const Icon(Icons.add),
         label: const Text('New Project'),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _projects.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.movie_creation_outlined,
-                            size: 96, color: Colors.white70),
-                        SizedBox(height: 24),
-                        Text(
-                          'No projects yet.\nTap "New Project" to import videos and start editing.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 16),
+      body: Consumer<EditorController>(
+        builder: (context, controller, _) => Stack(
+          children: [
+            _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _projects.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.movie_creation_outlined,
+                                  size: 96, color: Colors.white70),
+                              SizedBox(height: 24),
+                              Text(
+                                'No projects yet.\nTap "New Project" to import videos and start editing.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 16),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _refresh,
-                  child: GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 16,
-                      crossAxisSpacing: 16,
-                      childAspectRatio: 0.78,
-                    ),
-                    itemCount: _projects.length,
-                    itemBuilder: (context, index) {
-                      final project = _projects[index];
-                      return _ProjectCard(
-                        project: project,
-                        onTap: () => _openProject(context, project),
-                        onRename: () => _renameProject(project),
-                        onDelete: () => _deleteProject(project),
-                      );
-                    },
-                  ),
-                ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _refresh,
+                        child: GridView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            mainAxisSpacing: 16,
+                            crossAxisSpacing: 16,
+                            childAspectRatio: 0.78,
+                          ),
+                          itemCount: _projects.length,
+                          itemBuilder: (context, index) {
+                            final project = _projects[index];
+                            return _ProjectCard(
+                              project: project,
+                              onTap: () => _openProject(context, project),
+                              onRename: () => _renameProject(project),
+                              onDelete: () => _deleteProject(project),
+                            );
+                          },
+                        ),
+                      ),
+            LoadingOverlay(
+              visible: controller.isBusy,
+              message: controller.busyMessage,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -6,6 +6,7 @@ import '../models/video_clip.dart';
 import '../widgets/audio_track_bar.dart';
 import '../widgets/clip_timeline.dart';
 import '../widgets/clip_tile.dart';
+import '../widgets/loading_overlay.dart';
 import '../widgets/progress_dialog.dart';
 import 'about_screen.dart';
 import 'trim_screen.dart';
@@ -121,142 +122,158 @@ class EditorScreen extends StatelessWidget {
             (sum, c) => sum + c.trimmedDuration,
           );
 
-          return ListView(
-            padding: const EdgeInsets.all(16),
+          return Stack(
             children: [
-              Text('Timeline', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              ClipTimeline(
-                clips: controller.clips,
-                onTapClip: (clip) => _openTrimScreen(context, controller, clip),
+              _buildBody(context, controller, projectDuration),
+              LoadingOverlay(
+                visible: controller.isBusy,
+                message: controller.busyMessage,
               ),
-              if (controller.backgroundAudioPath != null) ...[
-                const SizedBox(height: 6),
-                AudioTrackBar(
-                  label: controller.backgroundAudioPath!.split('/').last,
-                  totalProjectDuration: projectDuration,
-                  audioDuration: controller.backgroundAudioDuration,
-                  trimStart: controller.backgroundAudioTrimStart,
-                  trimEnd: controller.backgroundAudioTrimEnd,
-                  offset: controller.backgroundAudioOffset,
-                  onOffsetChanged: controller.setBackgroundAudioOffset,
-                  onTrimStartChanged: controller.setBackgroundAudioTrimStart,
-                  onTrimEndChanged: controller.setBackgroundAudioTrimEnd,
-                  onDragEnd: () => controller.persistProject(),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Song starts at ${_formatShort(controller.backgroundAudioOffset)} '
-                  'and plays for ${_formatShort(controller.backgroundAudioTrimEnd - controller.backgroundAudioTrimStart)}. '
-                  'Drag the middle to move it, drag the edges to trim it.',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: Colors.white54),
-                ),
-              ],
-              const SizedBox(height: 16),
-              Text('Clips', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              if (controller.clips.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Text('No clips yet. Add a video to get started.'),
-                ),
-              ReorderableListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: controller.clips.length,
-                onReorder: controller.reorderClip,
-                itemBuilder: (context, index) {
-                  final clip = controller.clips[index];
-                  return ClipTile(
-                    key: ValueKey(clip.id),
-                    clip: clip,
-                    onTrim: () => _openTrimScreen(context, controller, clip),
-                    onRemove: () => controller.removeClip(clip.id),
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () => controller.importVideos(),
-                icon: const Icon(Icons.add),
-                label: const Text('Add More Clips'),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Tip: tap a clip on the timeline (or its scissors icon below) '
-                "to trim it and adjust that clip's own noise cancellation and volume.",
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Colors.white54),
-              ),
-              const Divider(height: 32),
-              Text('Background Audio',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              if (controller.backgroundAudioPath == null)
-                OutlinedButton.icon(
-                  onPressed: () => controller.pickBackgroundAudio(),
-                  icon: const Icon(Icons.folder_outlined),
-                  label: const Text('Add Background Audio (from Storage)'),
-                )
-              else
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => controller.removeBackgroundAudio(),
-                    icon: const Icon(Icons.close, size: 18),
-                    label: const Text('Remove Background Audio'),
-                  ),
-                ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                activeColor: Colors.amber.shade400,
-                title: const Text('Noise cancellation'),
-                subtitle:
-                    const Text('Reduce background hiss on the audio track'),
-                value: controller.noiseCancellationEnabled,
-                onChanged: controller.backgroundAudioPath == null
-                    ? null
-                    : controller.setNoiseCancellation,
-              ),
-              const SizedBox(height: 8),
-              Text('Volume boost: ${controller.volumePercent.round()}%'),
-              Slider(
-                activeColor: Colors.amber.shade400,
-                value: controller.volumePercent,
-                min: 100,
-                max: 300,
-                divisions: 20,
-                label: '${controller.volumePercent.round()}%',
-                onChanged: controller.backgroundAudioPath == null
-                    ? null
-                    : controller.setVolumePercent,
-                onChangeEnd: controller.backgroundAudioPath == null
-                    ? null
-                    : (_) => controller.persistProject(),
-              ),
-              const Divider(height: 32),
-              Text(
-                'Total length: ${controller.totalTrimmedSeconds.toStringAsFixed(1)}s',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: controller.clips.isEmpty
-                    ? null
-                    : () => _startExport(context, controller),
-                icon: const Icon(Icons.file_download_outlined),
-                label: const Text('Export Video'),
-              ),
-              const SizedBox(height: 24),
             ],
           );
         },
       ),
+    );
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    EditorController controller,
+    Duration projectDuration,
+  ) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text('Timeline', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        ClipTimeline(
+          clips: controller.clips,
+          onTapClip: (clip) => _openTrimScreen(context, controller, clip),
+        ),
+        if (controller.backgroundAudioPath != null) ...[
+          const SizedBox(height: 6),
+          AudioTrackBar(
+            label: controller.backgroundAudioPath!.split('/').last,
+            totalProjectDuration: projectDuration,
+            audioDuration: controller.backgroundAudioDuration,
+            trimStart: controller.backgroundAudioTrimStart,
+            trimEnd: controller.backgroundAudioTrimEnd,
+            offset: controller.backgroundAudioOffset,
+            onOffsetChanged: controller.setBackgroundAudioOffset,
+            onTrimStartChanged: controller.setBackgroundAudioTrimStart,
+            onTrimEndChanged: controller.setBackgroundAudioTrimEnd,
+            onDragEnd: () => controller.persistProject(),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Song starts at ${_formatShort(controller.backgroundAudioOffset)} '
+            'and plays for ${_formatShort(controller.backgroundAudioTrimEnd - controller.backgroundAudioTrimStart)}. '
+            'Drag the middle to move it, drag the edges to trim it.',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.white54),
+          ),
+        ],
+        const SizedBox(height: 16),
+        Text('Clips', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        if (controller.clips.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('No clips yet. Add a video to get started.'),
+          ),
+        ReorderableListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: controller.clips.length,
+          onReorder: controller.reorderClip,
+          itemBuilder: (context, index) {
+            final clip = controller.clips[index];
+            return ClipTile(
+              key: ValueKey(clip.id),
+              clip: clip,
+              onTrim: () => _openTrimScreen(context, controller, clip),
+              onRemove: () => controller.removeClip(clip.id),
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () => controller.importVideos(),
+          icon: const Icon(Icons.add),
+          label: const Text('Add More Clips'),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Tip: tap a clip on the timeline (or its scissors icon below) '
+          "to trim it and adjust that clip's own noise cancellation and volume.",
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: Colors.white54),
+        ),
+        const Divider(height: 32),
+        Text('Background Audio',
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        if (controller.backgroundAudioPath == null)
+          OutlinedButton.icon(
+            onPressed: () => controller.pickBackgroundAudio(),
+            icon: const Icon(Icons.folder_outlined),
+            label: const Text('Add Background Audio (from Storage)'),
+          )
+        else
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => controller.removeBackgroundAudio(),
+              icon: const Icon(Icons.close, size: 18),
+              label: const Text('Remove Background Audio'),
+            ),
+          ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          activeColor: Colors.amber.shade400,
+          title: const Text('Noise cancellation'),
+          subtitle:
+              const Text('Reduce background hiss on the audio track'),
+          value: controller.noiseCancellationEnabled,
+          onChanged: controller.backgroundAudioPath == null
+              ? null
+              : controller.setNoiseCancellation,
+        ),
+        const SizedBox(height: 8),
+        Text('Volume boost: ${controller.volumePercent.round()}%'),
+        Slider(
+          activeColor: Colors.amber.shade400,
+          value: controller.volumePercent,
+          min: 100,
+          max: 300,
+          divisions: 20,
+          label: '${controller.volumePercent.round()}%',
+          onChanged: controller.backgroundAudioPath == null
+              ? null
+              : controller.setVolumePercent,
+          onChangeEnd: controller.backgroundAudioPath == null
+              ? null
+              : (_) => controller.persistProject(),
+        ),
+        const Divider(height: 32),
+        Text(
+          'Total length: ${controller.totalTrimmedSeconds.toStringAsFixed(1)}s',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: controller.clips.isEmpty
+              ? null
+              : () => _startExport(context, controller),
+          icon: const Icon(Icons.file_download_outlined),
+          label: const Text('Export Video'),
+        ),
+        const SizedBox(height: 24),
+      ],
     );
   }
 }

@@ -32,6 +32,14 @@ class EditorController extends ChangeNotifier {
 
   List<VideoClip> get clips => _project?.clips ?? const [];
   String? get backgroundAudioPath => _project?.backgroundAudioPath;
+  Duration get backgroundAudioDuration =>
+      _project?.backgroundAudioDuration ?? Duration.zero;
+  Duration get backgroundAudioTrimStart =>
+      _project?.backgroundAudioTrimStart ?? Duration.zero;
+  Duration get backgroundAudioTrimEnd =>
+      _project?.backgroundAudioTrimEnd ?? Duration.zero;
+  Duration get backgroundAudioOffset =>
+      _project?.backgroundAudioOffset ?? Duration.zero;
   bool get noiseCancellationEnabled =>
       _project?.noiseCancellationEnabled ?? false;
   double get volumePercent => _project?.volumePercent ?? 100;
@@ -155,15 +163,28 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Opens the file picker (storage, not a music-app chooser) and copies
-  /// the chosen audio file into the project's own media folder.
+  /// Opens the file picker (storage, not a music-app chooser), copies the
+  /// chosen audio file into the project's own media folder, probes its
+  /// duration, and places it on the timeline starting at 0 with a default
+  /// trim that fills (but never exceeds) the current project length.
   Future<void> pickBackgroundAudio() async {
     if (_project == null) return;
     final file = await _mediaService.pickAudioFile();
     if (file == null) return;
     final persistedPath =
         await _projectService.importMedia(_project!.id, file);
+    final duration = await _ffmpegService.getDuration(persistedPath);
+    final projectDuration = _project!.totalDuration;
+
     _project!.backgroundAudioPath = persistedPath;
+    _project!.backgroundAudioDuration = duration;
+    _project!.backgroundAudioTrimStart = Duration.zero;
+    _project!.backgroundAudioTrimEnd =
+        (projectDuration == Duration.zero || duration <= projectDuration)
+            ? duration
+            : projectDuration;
+    _project!.backgroundAudioOffset = Duration.zero;
+
     await persistProject();
     notifyListeners();
   }
@@ -171,9 +192,38 @@ class EditorController extends ChangeNotifier {
   void removeBackgroundAudio() {
     if (_project == null) return;
     _project!.backgroundAudioPath = null;
+    _project!.backgroundAudioDuration = Duration.zero;
+    _project!.backgroundAudioTrimStart = Duration.zero;
+    _project!.backgroundAudioTrimEnd = Duration.zero;
+    _project!.backgroundAudioOffset = Duration.zero;
     _project!.noiseCancellationEnabled = false;
     _project!.volumePercent = 100;
     persistProject();
+    notifyListeners();
+  }
+
+  /// Moves the background audio segment to start [value] into the video
+  /// timeline, without changing which part of the source file plays or
+  /// how long the segment is (a "slide" edit).
+  void setBackgroundAudioOffset(Duration value) {
+    if (_project == null) return;
+    _project!.backgroundAudioOffset = value;
+    notifyListeners();
+  }
+
+  /// Adjusts the in-point of the background audio segment (dragging the
+  /// left edge on the timeline).
+  void setBackgroundAudioTrimStart(Duration value) {
+    if (_project == null) return;
+    _project!.backgroundAudioTrimStart = value;
+    notifyListeners();
+  }
+
+  /// Adjusts the out-point of the background audio segment (dragging the
+  /// right edge on the timeline).
+  void setBackgroundAudioTrimEnd(Duration value) {
+    if (_project == null) return;
+    _project!.backgroundAudioTrimEnd = value;
     notifyListeners();
   }
 
@@ -321,6 +371,9 @@ class EditorController extends ChangeNotifier {
         await _ffmpegService.mixBackgroundAudio(
           videoPath: mergedPath,
           audioPath: backgroundAudioPath!,
+          audioTrimStart: backgroundAudioTrimStart,
+          audioTrimEnd: backgroundAudioTrimEnd,
+          timelineOffset: backgroundAudioOffset,
           noiseCancellation: noiseCancellationEnabled,
           volumePercent: volumePercent,
           outputPath: mixedPath,

@@ -182,17 +182,19 @@ class FFmpegService {
     );
   }
 
-  /// Mixes a background audio track into [videoPath]. When [noiseCancellation]
-  /// is true, a highpass filter plus an adaptive FFT noise-reduction filter
-  /// (afftdn) are applied to the background track first. [volumePercent]
-  /// (100-300) boosts the background track's loudness, with a limiter
-  /// applied afterwards so the boosted audio never hard-clips. If the
-  /// source video already has its own audio track, the two tracks are
-  /// mixed together; otherwise the background track becomes the video's
-  /// only audio.
+  /// Mixes a background audio track into [videoPath], CapCut-style: only
+  /// the [audioTrimStart]..[audioTrimEnd] slice of the source audio file is
+  /// used, and that slice starts playing [timelineOffset] into the video
+  /// instead of always at time zero. The output is always exactly
+  /// [videoPath]'s own duration long - the audio segment is silence-padded
+  /// or cut to fit, so placing a short or offset clip never shortens or
+  /// lengthens the video itself.
   Future<void> mixBackgroundAudio({
     required String videoPath,
     required String audioPath,
+    required Duration audioTrimStart,
+    required Duration audioTrimEnd,
+    required Duration timelineOffset,
     required bool noiseCancellation,
     required double volumePercent,
     required String outputPath,
@@ -201,17 +203,28 @@ class FFmpegService {
     final videoDuration = await getDuration(videoPath);
     final videoHasAudio = await hasAudioStream(videoPath);
 
-    final filters = _audioFilters(
+    final trimStartSec = audioTrimStart.inMilliseconds / 1000.0;
+    final trimEndSec = audioTrimEnd.inMilliseconds / 1000.0;
+    final offsetMs = timelineOffset.inMilliseconds;
+
+    final chain = StringBuffer(
+        'atrim=start=$trimStartSec:end=$trimEndSec,asetpts=PTS-STARTPTS');
+    if (offsetMs > 0) {
+      // all=1 applies the delay to every channel regardless of whether the
+      // source is mono or stereo.
+      chain.write(',adelay=$offsetMs:all=1');
+    }
+    for (final f in _audioFilters(
       noiseCancellation: noiseCancellation,
       volumePercent: volumePercent,
-    );
-    // amix normalizes levels itself, but we still want our own limiter as
-    // the final safety net after any boost, so always ensure one is present
-    // when a background track is involved.
-    if (!filters.contains('alimiter=limit=0.95')) {
-      filters.add('alimiter=limit=0.95');
+    )) {
+      chain.write(',$f');
     }
-    final bgChain = filters.join(',');
+    // Pad with silence so the segment covers the rest of the video after
+    // it ends - the explicit -t on the output command below then cuts
+    // everything to exactly the video's length.
+    chain.write(',apad');
+    final bgChain = chain.toString();
 
     final String filterComplex;
     if (videoHasAudio) {
@@ -222,10 +235,12 @@ class FFmpegService {
       filterComplex = '[1:a]$bgChain[aout]';
     }
 
+    final videoDurationSec = videoDuration.inMilliseconds / 1000.0;
+
     final command = '-y -i "$videoPath" -i "$audioPath" '
         '-filter_complex "$filterComplex" '
         '-map 0:v -map "[aout]" '
-        '-c:v copy -c:a aac -b:a 192k -shortest '
+        '-c:v copy -c:a aac -b:a 192k -t $videoDurationSec '
         '-movflags +faststart "$outputPath"';
 
     await _runCommand(

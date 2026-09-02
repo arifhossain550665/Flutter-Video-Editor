@@ -73,10 +73,16 @@ class FFmpegService {
   }) {
     final filters = <String>[];
     if (noiseCancellation) {
-      filters.add('highpass=f=100');
-      filters.add('afftdn=nf=-30');
+      // Two aggressive denoise passes plus a rumble/hum-cutting highpass -
+      // strong enough to be clearly audible on real background noise
+      // (traffic, fans, room hiss). On already-clean audio this will
+      // correctly sound almost identical to the source, since there is
+      // simply nothing left to remove.
+      filters.add('highpass=f=120');
+      filters.add('afftdn=nf=-45:nr=25:nt=w');
+      filters.add('afftdn=nf=-40:nr=20:nt=w');
     }
-    final multiplier = (volumePercent / 100.0).clamp(0.1, 3.0);
+    final multiplier = (volumePercent / 100.0).clamp(0.1, 3.0).toDouble();
     if (multiplier != 1.0) {
       filters.add('volume=$multiplier');
       filters.add('alimiter=limit=0.95');

@@ -312,7 +312,7 @@ class _EditorScreenState extends State<EditorScreen> {
               label: const Text('Remove Background Audio'),
             ),
           ),
-                SwitchListTile(
+        SwitchListTile(
           contentPadding: EdgeInsets.zero,
           activeColor: Colors.amber.shade400,
           title: const Text('Noise cancellation (background audio)'),
@@ -344,7 +344,6 @@ class _EditorScreenState extends State<EditorScreen> {
               ? null
               : (_) => controller.persistProject(),
         ),
-
         const Divider(height: 32),
         Text(
           'Total length: ${controller.totalTrimmedSeconds.toStringAsFixed(1)}s',

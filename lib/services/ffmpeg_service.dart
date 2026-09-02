@@ -70,17 +70,28 @@ class FFmpegService {
   List<String> _audioFilters({
     required bool noiseCancellation,
     required double volumePercent,
+    String? denoiseModelPath,
   }) {
     final filters = <String>[];
     if (noiseCancellation) {
-      // Two aggressive denoise passes plus a rumble/hum-cutting highpass -
-      // strong enough to be clearly audible on real background noise
-      // (traffic, fans, room hiss). On already-clean audio this will
-      // correctly sound almost identical to the source, since there is
-      // simply nothing left to remove.
-      filters.add('highpass=f=120');
-      filters.add('afftdn=nf=-45:nr=25:nt=w');
-      filters.add('afftdn=nf=-40:nr=20:nt=w');
+      filters.add('highpass=f=100');
+      if (denoiseModelPath != null) {
+        // RNNoise: a neural network trained to separate speech from noise,
+        // so - unlike a plain spectral filter - it also works on dynamic,
+        // non-steady noise (crowd chatter, wind, traffic, keyboard
+        // clicks), not just constant hiss/hum. mix=0.85 keeps it strong
+        // without fully flattening the voice.
+        final escapedPath = denoiseModelPath.replaceAll("'", r"'\''");
+        filters.add("arnndn=m='$escapedPath':mix=0.85");
+      } else {
+        // Fallback when no trained model is bundled: two different
+        // classical DSP denoisers stacked together. Effective on steady
+        // hiss/hum/drone; cannot reliably separate speech from dynamic,
+        // non-steady noise the way a trained model can.
+        filters.add('anlmdn=s=0.001');
+        filters.add('afftdn=nf=-45:nr=25:nt=w');
+        filters.add('afftdn=nf=-40:nr=20:nt=w');
+      }
     }
     final multiplier = (volumePercent / 100.0).clamp(0.1, 3.0).toDouble();
     if (multiplier != 1.0) {
@@ -106,6 +117,7 @@ class FFmpegService {
     required String outputPath,
     bool noiseCancellation = false,
     double volumePercent = 100,
+    String? denoiseModelPath,
     StageProgressCallback? onProgress,
   }) async {
     final duration = end - start;
@@ -125,6 +137,7 @@ class FFmpegService {
       final filters = _audioFilters(
         noiseCancellation: noiseCancellation,
         volumePercent: volumePercent,
+        denoiseModelPath: denoiseModelPath,
       );
       final audioFilterArg = filters.isEmpty ? '' : '-af "${filters.join(',')}" ';
       audioArgs = '$audioFilterArg-c:a aac -b:a 192k -ar 44100 -ac 2';
@@ -204,6 +217,7 @@ class FFmpegService {
     required bool noiseCancellation,
     required double volumePercent,
     required String outputPath,
+    String? denoiseModelPath,
     StageProgressCallback? onProgress,
   }) async {
     final videoDuration = await getDuration(videoPath);
@@ -223,6 +237,7 @@ class FFmpegService {
     for (final f in _audioFilters(
       noiseCancellation: noiseCancellation,
       volumePercent: volumePercent,
+      denoiseModelPath: denoiseModelPath,
     )) {
       chain.write(',$f');
     }

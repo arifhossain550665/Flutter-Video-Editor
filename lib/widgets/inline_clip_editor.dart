@@ -1,26 +1,28 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
 
 import '../models/video_clip.dart';
 import '../services/ffmpeg_service.dart';
 import '../services/media_service.dart';
+import 'project_preview_controller.dart';
 import 'trim_timeline.dart';
 
-/// Inline, same-screen clip editor: video preview, CapCut-style filmstrip
-/// trim timeline, and per-clip noise cancellation / volume boost controls -
-/// all embedded directly on the main editor screen (below the project
-/// timeline) instead of opening a separate route, so the whole project and
-/// this clip's controls stay visible together.
+/// Inline, same-screen clip editor: a CapCut-style filmstrip trim timeline
+/// plus per-clip noise cancellation / volume boost controls, embedded
+/// directly below the project timeline. It drives the shared
+/// [ProjectPreviewController] (the one persistent preview at the top of
+/// the editor) instead of opening its own separate video player, so
+/// trimming this clip and watching the change happen both happen in the
+/// exact same place.
 class InlineClipEditor extends StatefulWidget {
   final VideoClip clip;
+  final ProjectPreviewController previewController;
   final void Function(Map<String, dynamic> settings) onDone;
   final VoidCallback onClose;
 
   const InlineClipEditor({
     super.key,
     required this.clip,
+    required this.previewController,
     required this.onDone,
     required this.onClose,
   });
@@ -33,14 +35,12 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
   final FFmpegService _ffmpegService = FFmpegService();
   final MediaService _mediaService = MediaService();
 
-  late VideoPlayerController _controller;
   late Duration _start;
   late Duration _end;
   late double _volumePercent;
   late bool _noiseCancellation;
 
   List<String> _thumbnails = [];
-  bool _videoReady = false;
   bool _thumbnailsLoading = true;
   String? _loadedClipId;
 
@@ -53,12 +53,9 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
   @override
   void didUpdateWidget(covariant InlineClipEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Only reload the player/thumbnails/trim state when the user actually
-    // selected a *different* clip - an unrelated rebuild (e.g. another
-    // clip being imported elsewhere) must never reset in-progress edits.
+    // Only reload when the user actually selected a *different* clip - an
+    // unrelated rebuild elsewhere must never reset in-progress edits.
     if (oldWidget.clip.id != widget.clip.id) {
-      _controller.removeListener(_onTick);
-      _controller.dispose();
       _loadClip(widget.clip);
     }
   }
@@ -69,17 +66,11 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
     _end = clip.trimEnd;
     _volumePercent = clip.volumePercent;
     _noiseCancellation = clip.noiseCancellationEnabled;
-    _videoReady = false;
     _thumbnailsLoading = true;
     _thumbnails = [];
 
-    _controller = VideoPlayerController.file(File(clip.sourcePath));
-    _controller.initialize().then((_) {
-      if (!mounted || _loadedClipId != clip.id) return;
-      setState(() => _videoReady = true);
-      _controller.seekTo(_start);
-    });
-    _controller.addListener(_onTick);
+    // Point the shared preview at this clip's current in-point right away.
+    widget.previewController.previewClipFilePosition(clip, _start);
 
     _loadThumbnails(clip);
   }
@@ -107,41 +98,12 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
     }
   }
 
-  void _onTick() {
-    if (!mounted) return;
-    if (_controller.value.isPlaying && _controller.value.position >= _end) {
-      _controller.pause();
-      _controller.seekTo(_start);
-    }
-    setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _controller.removeListener(_onTick);
-    _controller.dispose();
-    super.dispose();
-  }
-
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.toString().padLeft(2, '0');
     final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
     final centis =
         ((d.inMilliseconds % 1000) ~/ 10).toString().padLeft(2, '0');
     return '$minutes:$seconds.$centis';
-  }
-
-  void _togglePlayback() {
-    if (_controller.value.isPlaying) {
-      _controller.pause();
-    } else {
-      final position = _controller.value.position;
-      if (position >= _end || position < _start) {
-        _controller.seekTo(_start);
-      }
-      _controller.play();
-    }
-    setState(() {});
   }
 
   void _commit() {
@@ -188,96 +150,86 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
               ),
             ],
           ),
-          if (!_videoReady)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 40),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else ...[
-            AspectRatio(
-              aspectRatio: _controller.value.aspectRatio,
-              child: VideoPlayer(_controller),
-            ),
-            Center(
-              child: IconButton(
-                iconSize: 40,
-                icon: Icon(
-                  _controller.value.isPlaying
-                      ? Icons.pause_circle_filled
-                      : Icons.play_circle_filled,
-                ),
-                onPressed: _togglePlayback,
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                _formatDuration(_start),
+                style: const TextStyle(color: Colors.amber, fontSize: 12),
               ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  _formatDuration(_start),
-                  style: const TextStyle(color: Colors.amber, fontSize: 12),
-                ),
-                Text(
-                  '${_formatDuration(_end - _start)} selected',
-                  style:
-                      const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                Text(
-                  _formatDuration(_end),
-                  style: const TextStyle(color: Colors.amber, fontSize: 12),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            _thumbnailsLoading
-                ? const SizedBox(
-                    height: 64,
-                    child: Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
+              Text(
+                '${_formatDuration(_end - _start)} selected',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              Text(
+                _formatDuration(_end),
+                style: const TextStyle(color: Colors.amber, fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _thumbnailsLoading
+              ? const SizedBox(
+                  height: 64,
+                  child: Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                  )
-                : TrimTimeline(
-                    thumbnails: _thumbnails,
-                    totalDuration: widget.clip.sourceDuration,
-                    start: _start,
-                    end: _end,
-                    playhead: _controller.value.position,
-                    onStartChanged: (value) {
-                      setState(() => _start = value);
-                      _controller.seekTo(value);
-                    },
-                    onEndChanged: (value) {
-                      setState(() => _end = value);
-                      _controller.seekTo(value);
-                    },
-                    onScrub: (value) => _controller.seekTo(value),
                   ),
-            const SizedBox(height: 12),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              activeColor: Colors.amber.shade400,
-              title: const Text('Noise cancellation',
-                  style: TextStyle(fontSize: 13)),
-              value: _noiseCancellation,
-              onChanged: (value) =>
-                  setState(() => _noiseCancellation = value),
-            ),
-            Text('Volume boost: ${_volumePercent.round()}%',
-                style: const TextStyle(fontSize: 13)),
-            Slider(
-              activeColor: Colors.amber.shade400,
-              value: _volumePercent,
-              min: 100,
-              max: 300,
-              divisions: 20,
-              label: '${_volumePercent.round()}%',
-              onChanged: (value) => setState(() => _volumePercent = value),
-            ),
-          ],
+                )
+              : AnimatedBuilder(
+                  animation: widget.previewController,
+                  builder: (context, _) {
+                    final playhead =
+                        widget.previewController.activeController?.value
+                                .position ??
+                            _start;
+                    return TrimTimeline(
+                      thumbnails: _thumbnails,
+                      totalDuration: widget.clip.sourceDuration,
+                      start: _start,
+                      end: _end,
+                      playhead: playhead,
+                      onStartChanged: (value) {
+                        setState(() => _start = value);
+                        widget.previewController
+                            .previewClipFilePosition(widget.clip, value);
+                      },
+                      onEndChanged: (value) {
+                        setState(() => _end = value);
+                        widget.previewController
+                            .previewClipFilePosition(widget.clip, value);
+                      },
+                      onScrub: (value) => widget.previewController
+                          .previewClipFilePosition(widget.clip, value),
+                    );
+                  },
+                ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            activeColor: Colors.amber.shade400,
+            title: const Text('Noise cancellation',
+                style: TextStyle(fontSize: 13)),
+            value: _noiseCancellation,
+            onChanged: (value) =>
+                setState(() => _noiseCancellation = value),
+          ),
+          Text('Volume boost: ${_volumePercent.round()}%',
+              style: const TextStyle(fontSize: 13)),
+          Slider(
+            activeColor: Colors.amber.shade400,
+            value: _volumePercent,
+            min: 100,
+            max: 300,
+            divisions: 20,
+            label: '${_volumePercent.round()}%',
+            onChanged: (value) => setState(() => _volumePercent = value),
+          ),
         ],
       ),
     );

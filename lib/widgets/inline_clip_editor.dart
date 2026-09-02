@@ -209,17 +209,21 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
                   },
                 ),
           const SizedBox(height: 12),
-          SwitchListTile(
+                    SwitchListTile(
             contentPadding: EdgeInsets.zero,
             dense: true,
             activeColor: Colors.amber.shade400,
-            title: const Text('Noise cancellation',
+            title: const Text("This clip's noise cancellation",
                 style: TextStyle(fontSize: 13)),
+            subtitle: const Text(
+              'Only reduces hiss/hum if this clip actually has any',
+              style: TextStyle(fontSize: 11),
+            ),
             value: _noiseCancellation,
             onChanged: (value) =>
                 setState(() => _noiseCancellation = value),
           ),
-          Text('Volume boost: ${_volumePercent.round()}%',
+          Text("This clip's volume boost: ${_volumePercent.round()}%",
               style: const TextStyle(fontSize: 13)),
           Slider(
             activeColor: Colors.amber.shade400,
@@ -229,6 +233,13 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
             divisions: 20,
             label: '${_volumePercent.round()}%',
             onChanged: (value) => setState(() => _volumePercent = value),
+          ),
+          const Text(
+            'Tip: the preview above doesn\'t play boosted volume live - '
+            'the boost is audible in the exported video. Tap Done to save.',
+            style: TextStyle(fontSize: 11, color: Colors.white54),
+          ),
+
           ),
         ],
       ),

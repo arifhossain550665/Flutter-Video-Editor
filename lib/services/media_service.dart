@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
@@ -136,6 +137,28 @@ class MediaService {
     final hasAccess = await Gal.hasAccess();
     if (hasAccess) return true;
     return Gal.requestAccess();
+  }
+
+  /// Copies the bundled RNNoise model asset (assets/models/std.rnnn) to a
+  /// real file the first time it's needed, and returns its filesystem
+  /// path so it can be passed to FFmpeg's arnndn filter. Returns null if
+  /// the asset isn't bundled - e.g. the optional model file hasn't been
+  /// added to the project yet - so callers can gracefully fall back to
+  /// the built-in (non-AI) denoise filters instead of crashing.
+  Future<String?> resolveDenoiseModelPath() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final file = File('${dir.path}/std.rnnn');
+      if (!await file.exists()) {
+        final data = await rootBundle.load('assets/models/std.rnnn');
+        await file.writeAsBytes(
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        );
+      }
+      return file.path;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Saves the finished video at [path] into the device photo gallery inside

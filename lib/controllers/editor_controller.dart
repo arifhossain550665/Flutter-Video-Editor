@@ -339,6 +339,11 @@ class EditorController extends ChangeNotifier {
 
       await _mediaService.clearWorkingDirectory();
 
+      // Resolved once per export: null if the optional RNNoise model
+      // asset hasn't been bundled, in which case the stronger built-in
+      // DSP denoise chain is used instead automatically.
+      final denoiseModelPath = await _mediaService.resolveDenoiseModelPath();
+
       stage = ExportStage.trimming;
       notifyListeners();
 
@@ -357,6 +362,7 @@ class EditorController extends ChangeNotifier {
           outputPath: outputPath,
           noiseCancellation: clip.noiseCancellationEnabled,
           volumePercent: clip.volumePercent,
+          denoiseModelPath: denoiseModelPath,
           onProgress: (p) {
             final clipShare = 1 / clips.length;
             final completedShare = i / clips.length;
@@ -403,6 +409,7 @@ class EditorController extends ChangeNotifier {
           timelineOffset: backgroundAudioOffset,
           noiseCancellation: noiseCancellationEnabled,
           volumePercent: volumePercent,
+          denoiseModelPath: denoiseModelPath,
           outputPath: mixedPath,
           onProgress: (p) {
             overallProgress = trimWeight + mergeWeight + p * mixWeight;

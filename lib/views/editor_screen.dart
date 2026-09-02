@@ -9,14 +9,16 @@ import '../widgets/clip_tile.dart';
 import '../widgets/inline_clip_editor.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/progress_dialog.dart';
+import '../widgets/project_preview_controller.dart';
+import '../widgets/project_preview_player.dart';
 import 'about_screen.dart';
 
 const _bgColor = Color(0xFF121214);
 
-/// The main editing screen: a single continuous surface where the whole
-/// project timeline, the currently-selected clip's editor, background
-/// audio placement, and export controls all live together - CapCut-style,
-/// instead of trimming a clip on a separate page.
+/// The main editing screen: one continuous surface where the persistent
+/// project preview, the whole clip timeline, the currently-selected
+/// clip's trim controls, background audio placement, and export all live
+/// together - CapCut-style - instead of trimming a clip on a separate page.
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
 
@@ -26,11 +28,27 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen> {
   String? _selectedClipId;
+  late final ProjectPreviewController _previewController;
+
+  @override
+  void initState() {
+    super.initState();
+    _previewController = ProjectPreviewController();
+  }
+
+  @override
+  void dispose() {
+    _previewController.dispose();
+    super.dispose();
+  }
 
   void _selectClip(VideoClip clip) {
     setState(() {
       _selectedClipId = _selectedClipId == clip.id ? null : clip.id;
     });
+    if (_selectedClipId == clip.id) {
+      _previewController.seekToClipStart(clip.id);
+    }
   }
 
   void _closeInlineEditor() {
@@ -56,6 +74,8 @@ class _EditorScreenState extends State<EditorScreen> {
     BuildContext context,
     EditorController controller,
   ) async {
+    await _previewController.pause();
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -135,6 +155,11 @@ class _EditorScreenState extends State<EditorScreen> {
             return const Center(child: Text('No project loaded.'));
           }
 
+          // Keep the shared preview in sync with whatever clips currently
+          // exist (fire-and-forget: cheap no-op when nothing relevant
+          // changed, since the same active clip just gets re-indexed).
+          _previewController.setClips(controller.clips);
+
           // If the selected clip was removed elsewhere, drop the stale
           // selection instead of pointing the inline editor at nothing.
           VideoClip? selectedClip;
@@ -152,19 +177,9 @@ class _EditorScreenState extends State<EditorScreen> {
             }
           }
 
-          final projectDuration = controller.clips.fold<Duration>(
-            Duration.zero,
-            (sum, c) => sum + c.trimmedDuration,
-          );
-
           return Stack(
             children: [
-              _buildBody(
-                context,
-                controller,
-                projectDuration,
-                selectedClip,
-              ),
+              _buildBody(context, controller, selectedClip),
               LoadingOverlay(
                 visible: controller.isBusy,
                 message: controller.busyMessage,
@@ -179,12 +194,20 @@ class _EditorScreenState extends State<EditorScreen> {
   Widget _buildBody(
     BuildContext context,
     EditorController controller,
-    Duration projectDuration,
     VideoClip? selectedClip,
   ) {
+    final projectDuration = controller.clips.fold<Duration>(
+      Duration.zero,
+      (sum, c) => sum + c.trimmedDuration,
+    );
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (controller.clips.isNotEmpty) ...[
+          ProjectPreviewPlayer(controller: _previewController),
+          const SizedBox(height: 12),
+        ],
         Text('Timeline', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         ClipTimeline(
@@ -221,6 +244,7 @@ class _EditorScreenState extends State<EditorScreen> {
           InlineClipEditor(
             key: ValueKey(selectedClip.id),
             clip: selectedClip,
+            previewController: _previewController,
             onDone: (result) =>
                 _applyInlineEdit(controller, selectedClip!, result),
             onClose: _closeInlineEditor,
@@ -263,7 +287,7 @@ class _EditorScreenState extends State<EditorScreen> {
         Text(
           'Tip: tap a clip on the timeline (or its scissors icon below) to '
           "edit it right here - trim, noise cancellation and volume, all "
-          "on this screen.",
+          "on this screen, with the preview above updating live.",
           style: Theme.of(context)
               .textTheme
               .bodySmall

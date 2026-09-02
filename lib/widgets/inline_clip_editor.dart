@@ -209,7 +209,7 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
                   },
                 ),
           const SizedBox(height: 12),
-                    SwitchListTile(
+          SwitchListTile(
             contentPadding: EdgeInsets.zero,
             dense: true,
             activeColor: Colors.amber.shade400,
@@ -238,8 +238,6 @@ class _InlineClipEditorState extends State<InlineClipEditor> {
             'Tip: the preview above doesn\'t play boosted volume live - '
             'the boost is audible in the exported video. Tap Done to save.',
             style: TextStyle(fontSize: 11, color: Colors.white54),
-          ),
-
           ),
         ],
       ),
